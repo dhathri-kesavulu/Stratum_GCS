@@ -1,0 +1,1304 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>Multi-Vehicle Ground Control System</title>
+
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css" />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Rajdhani:wght@500;600;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+
+<style>
+  :root{
+    --void:#050806;
+    --void-2:#0a120d;
+    --kaitoke:#004830;
+    --kaitoke-glow:#12c988;
+    --olive:#708238;
+    --wood:#3F301D;
+    --beige:#E7DEC4;
+    --ink:#15120c;
+    --white:#f4f7f4;
+  }
+
+  *{ box-sizing:border-box; margin:0; padding:0; }
+
+  html,body{
+    height:100%;
+    background:var(--void);
+    overflow:hidden;
+    font-family:'Rajdhani',sans-serif;
+  }
+
+  body{
+    position:relative;
+    color:var(--white);
+  }
+
+  /* ---------- rotating dot backdrop ---------- */
+  .dot-field{
+    position:fixed;
+    top:50%; left:50%;
+    width:220vmax; height:220vmax;
+    transform:translate(-50%,-50%) rotate(0deg);
+    background-image:radial-gradient(circle, rgba(18,201,136,0.10) 1.4px, transparent 1.4px);
+    background-size:30px 30px;
+    animation:spin 300s linear infinite;
+    pointer-events:none;
+    z-index:0;
+  }
+  @keyframes spin{ to{ transform:translate(-50%,-50%) rotate(360deg); } }
+
+  .void-vignette{
+    position:fixed; inset:0;
+    background:radial-gradient(ellipse at center, transparent 40%, rgba(5,8,6,0.75) 100%);
+    pointer-events:none;
+    z-index:1;
+  }
+
+  /* ---------- app shell ---------- */
+  .app{
+    position:relative;
+    z-index:2;
+    height:100vh;
+    display:grid;
+    grid-template-rows:auto 1fr auto;
+  }
+
+  .line-shadow-dark{
+    text-shadow:1px 1px 0 rgba(0,72,48,0.9), 2px 3px 6px rgba(0,0,0,0.65);
+  }
+  .line-shadow-light{
+    text-shadow:1px 1px 0 rgba(231,222,196,0.7), -1px -1px 0 rgba(255,255,255,0.25), 2px 2px 3px rgba(63,48,29,0.55);
+  }
+
+  /* ---------- top bar ---------- */
+  .topbar{
+    display:flex; align-items:center; justify-content:space-between;
+    padding:12px 28px;
+    border-bottom:1px solid rgba(18,201,136,0.25);
+    background:linear-gradient(180deg, rgba(10,18,13,0.9), rgba(10,18,13,0.4));
+  }
+  .brand{ display:flex; align-items:center; gap:14px; }
+  .brand-mark{
+    width:34px; height:34px;
+    border:2px solid var(--kaitoke-glow);
+    border-radius:50%;
+    position:relative;
+    box-shadow:0 0 14px rgba(18,201,136,0.55);
+    flex-shrink:0;
+  }
+  .brand-mark::before{
+    content:'';
+    position:absolute; top:50%; left:50%;
+    width:6px; height:6px; border-radius:50%;
+    background:var(--kaitoke-glow);
+    transform:translate(-50%,-50%);
+    box-shadow:0 0 8px var(--kaitoke-glow);
+  }
+  .brand h1{
+    font-family:'Orbitron',sans-serif;
+    font-weight:700;
+    font-size:clamp(14px, 2vw, 22px);
+    letter-spacing:2px;
+    color:var(--white);
+  }
+  .status-pill{
+    font-family:'Share Tech Mono',monospace;
+    font-size:13px;
+    letter-spacing:1px;
+    padding:8px 16px;
+    border:1px solid rgba(18,201,136,0.4);
+    border-radius:20px;
+    background:rgba(0,72,48,0.25);
+    color:var(--kaitoke-glow);
+    white-space:nowrap;
+  }
+  .status-pill .dot{
+    display:inline-block; width:8px; height:8px; border-radius:50%;
+    background:var(--kaitoke-glow);
+    margin-right:8px;
+    box-shadow:0 0 8px var(--kaitoke-glow);
+    animation:pulse 2s ease-in-out infinite;
+  }
+  @keyframes pulse{ 0%,100%{ opacity:1; } 50%{ opacity:0.35; } }
+
+  .vehicle-toggle{
+    display:flex; gap:2px;
+    border:1px solid rgba(18,201,136,0.4);
+    border-radius:20px;
+    padding:3px;
+    background:rgba(0,72,48,0.2);
+  }
+  .vt-btn{
+    font-family:'Share Tech Mono',monospace;
+    font-size:11.5px; letter-spacing:0.5px;
+    padding:6px 14px;
+    border:none; border-radius:16px;
+    background:transparent;
+    color:rgba(244,247,244,0.6);
+    cursor:pointer;
+  }
+  .vt-btn.active{
+    background:rgba(18,201,136,0.28);
+    color:var(--kaitoke-glow);
+  }
+
+  /* ---------- main grid ---------- */
+  .grid{
+    display:grid;
+    grid-template-columns:1fr 400px;
+    gap:18px;
+    padding:18px 28px;
+    min-height:0;
+  }
+
+  /* ---------- map panel ---------- */
+  .map-panel{
+    position:relative;
+    border-radius:14px;
+    overflow:hidden;
+    border:1px solid rgba(18,201,136,0.3);
+    box-shadow:0 0 40px rgba(0,72,48,0.25), inset 0 0 60px rgba(0,0,0,0.4);
+  }
+  #map{ position:absolute; inset:0; background:var(--void); }
+  #scene3d{ position:absolute; inset:0; background:var(--void); display:none; }
+  #scene3d canvas{ display:block; width:100%; height:100%; }
+
+  .view-toggle{
+    position:absolute; top:16px; left:52px;
+    z-index:9999;
+    display:flex; gap:2px;
+    border:1px solid rgba(18,201,136,0.4);
+    border-radius:20px;
+    padding:3px;
+    background:rgba(5,8,6,0.85);
+    pointer-events:auto;
+  }
+  .view-btn{
+    font-family:'Share Tech Mono',monospace;
+    font-size:11.5px; letter-spacing:0.5px;
+    padding:6px 16px;
+    border:none; border-radius:16px;
+    background:transparent;
+    color:rgba(244,247,244,0.6);
+    cursor:pointer;
+  }
+  .view-btn.active{
+    background:rgba(18,201,136,0.28);
+    color:var(--kaitoke-glow);
+  }
+
+  .hud-overlay{ position:absolute; inset:0; pointer-events:none; }
+
+  .radar-rings{ position:absolute; inset:0; }
+  .radar-rings circle{ fill:none; stroke:rgba(18,201,136,0.28); stroke-width:1; }
+  .radar-sweep{
+    position:absolute; top:50%; left:50%;
+    width:46vw; max-width:600px; height:46vw; max-height:600px;
+    transform:translate(-50%,-50%);
+    border-radius:50%;
+    background:conic-gradient(from 0deg, rgba(18,201,136,0.35), transparent 25%);
+    animation:sweep 6s linear infinite;
+    mix-blend-mode:screen;
+  }
+  @keyframes sweep{ to{ transform:translate(-50%,-50%) rotate(360deg); } }
+
+  .crosshair{
+    position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
+    width:26px; height:26px;
+  }
+  .crosshair::before, .crosshair::after{
+    content:''; position:absolute; background:rgba(18,201,136,0.6);
+  }
+  .crosshair::before{ top:50%; left:0; width:100%; height:1px; }
+  .crosshair::after{ left:50%; top:0; height:100%; width:1px; }
+
+  .corner{ position:absolute; width:26px; height:26px; border:2px solid rgba(18,201,136,0.55); }
+  .corner-tl{ top:14px; left:14px; border-right:none; border-bottom:none; }
+  .corner-tr{ top:14px; right:14px; border-left:none; border-bottom:none; }
+  .corner-bl{ bottom:14px; left:14px; border-right:none; border-top:none; }
+  .corner-br{ bottom:14px; right:14px; border-left:none; border-top:none; }
+
+  .coord-readout{
+    position:absolute; bottom:16px; left:16px;
+    font-family:'Share Tech Mono',monospace;
+    font-size:13px; letter-spacing:1px;
+    color:var(--kaitoke-glow);
+    background:rgba(5,8,6,0.55);
+    padding:8px 12px; border-radius:6px;
+    border:1px solid rgba(18,201,136,0.3);
+  }
+
+  .map-hint{
+    position:absolute; top:16px; right:16px;
+    font-family:'Share Tech Mono',monospace;
+    font-size:11.5px; letter-spacing:0.5px;
+    color:rgba(244,247,244,0.65);
+    background:rgba(5,8,6,0.55);
+    padding:7px 12px; border-radius:6px;
+    border:1px solid rgba(18,201,136,0.25);
+  }
+
+  /* ---------- sidebar / instrument blocks ---------- */
+  .sidebar{
+  display:flex; flex-direction:column; gap:10px;
+  min-height:0;
+}
+
+  .block{
+  position:relative;
+  flex-shrink:0;
+  border-radius:12px;
+  padding:10px 14px;
+  background:linear-gradient(135deg, var(--beige) 0%, #cdbf99 45%, var(--olive) 78%, var(--wood) 100%);
+  box-shadow:0 10px 24px rgba(0,0,0,0.45), inset 0 0 0 1px rgba(63,48,29,0.35);
+  color:var(--ink);
+}
+  .block::before{
+    content:'';
+    position:absolute; inset:0; border-radius:12px; pointer-events:none;
+    background-image:
+      radial-gradient(circle at 10px 10px, rgba(63,48,29,0.55) 2px, transparent 2.2px),
+      radial-gradient(circle at calc(100% - 10px) 10px, rgba(63,48,29,0.55) 2px, transparent 2.2px),
+      radial-gradient(circle at 10px calc(100% - 10px), rgba(63,48,29,0.55) 2px, transparent 2.2px),
+      radial-gradient(circle at calc(100% - 10px) calc(100% - 10px), rgba(63,48,29,0.55) 2px, transparent 2.2px);
+  }
+
+  .block-head{
+    font-family:'Orbitron',sans-serif;
+    font-weight:700;
+    font-size:12px;
+    letter-spacing:2px;
+    color:var(--ink);
+    margin-bottom:7px;
+    padding-bottom:5px;
+    border-bottom:2px solid rgba(63,48,29,0.35);
+  }
+  .fleet-head{ display:flex; align-items:center; justify-content:space-between; }
+  .run-all-btn{
+    font-family:'Share Tech Mono',monospace;
+    font-size:10px; letter-spacing:0.5px;
+    padding:4px 10px;
+    border-radius:12px;
+    border:1px solid rgba(63,48,29,0.5);
+    background:rgba(63,48,29,0.15);
+    color:var(--wood);
+    cursor:pointer;
+    text-shadow:none;
+  }
+  .run-all-btn:hover{ background:rgba(63,48,29,0.3); }
+
+  .block-fleet{ flex-shrink:0; }
+  .block-telemetry{ flex-shrink:0; }
+  .block-mission{ flex:1; min-height:80px; display:flex; flex-direction:column; }
+  .param-pair{ display:flex; gap:14px; margin-bottom:7px; }
+  .param-pair .param-row{ flex:1; margin-bottom:0; }
+  .param-row{ margin-bottom:7px; }
+  .param-row:last-child{ margin-bottom:0; }
+  .param-label{
+  display:flex; justify-content:space-between; align-items:baseline;
+  font-size:11px; letter-spacing:1.3px; font-weight:600; opacity:0.75;
+  margin-bottom:4px;
+}
+.param-value{
+  font-family:'Share Tech Mono',monospace;
+  font-size:14px; font-weight:700; opacity:1;
+}
+.param-slider{
+  -webkit-appearance:none; appearance:none;
+  width:100%; height:6px; border-radius:4px;
+  background:rgba(63,48,29,0.35);
+  outline:none;
+  cursor:pointer;
+}
+.param-slider::-webkit-slider-thumb{
+  -webkit-appearance:none; appearance:none;
+  width:18px; height:18px; border-radius:50%;
+  background:var(--wood);
+  border:2px solid var(--beige);
+  box-shadow:0 0 6px rgba(0,0,0,0.4);
+  cursor:pointer;
+}
+.param-slider::-moz-range-thumb{
+  width:18px; height:18px; border-radius:50%;
+  background:var(--wood);
+  border:2px solid var(--beige);
+  cursor:pointer;
+}
+.param-hint{
+  font-size:10px; opacity:0.6; margin-top:5px; line-height:1.35;
+}
+.wp-progress{
+  font-family:'Share Tech Mono',monospace;
+  font-size:10.5px;
+  opacity:0.8;
+  margin:4px 0 5px;
+}
+.wp-buttons{ display:flex; gap:6px; }
+.wp-btn{
+  flex:1;
+  padding:6px 0;
+  border-radius:6px;
+  border:2px solid rgba(63,48,29,0.35);
+  background:rgba(244,247,244,0.35);
+  color:var(--ink);
+  font-family:'Share Tech Mono',monospace;
+  font-weight:700;
+  font-size:10.5px;
+  cursor:pointer;
+}
+.wp-btn:hover{ background:rgba(244,247,244,0.55); }
+  .drone-cards{
+  display:grid;
+  grid-template-columns:repeat(3, 1fr);
+  grid-template-rows:repeat(2, 1fr);
+  gap:6px;
+  height:84px;
+}
+  .drone-card{
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    gap:3px;
+    border-radius:8px;
+    background:rgba(244,247,244,0.35);
+    border:2px solid transparent;
+    cursor:pointer;
+    font-family:'Rajdhani',sans-serif;
+    font-weight:600;
+    text-align:center;
+  }
+  .drone-card.selected{ border-color:var(--wood); background:rgba(244,247,244,0.55); }
+  .drone-card .swatch{ width:11px; height:11px; border-radius:50%; }
+  .drone-card .name{ font-size:12.5px; }
+  .drone-card .badge{ font-family:'Share Tech Mono',monospace; font-size:10px; opacity:0.75; }
+  .add-drone-card{
+    display:flex; align-items:center; justify-content:center;
+    border-radius:8px;
+    border:2px dashed rgba(63,48,29,0.45);
+    background:rgba(244,247,244,0.15);
+    cursor:pointer;
+    font-family:'Orbitron',sans-serif;
+    font-size:22px;
+    color:var(--wood);
+  }
+  .add-drone-card:hover{ background:rgba(244,247,244,0.3); }
+
+  .telemetry-grid{ display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+  .tele-item{ }
+  .tele-label{ font-size:12px; letter-spacing:1.5px; font-weight:600; opacity:0.7; }
+  .tele-value{
+    font-family:'Share Tech Mono',monospace;
+    font-size:clamp(20px, 2vw, 26px);
+    font-weight:700;
+    line-height:1.3;
+  }
+
+  .mission-log{
+    flex:1; overflow-y:auto;
+    font-family:'Share Tech Mono',monospace;
+    font-size:13px;
+    display:flex; flex-direction:column; gap:6px;
+  }
+  .mission-log::-webkit-scrollbar{ width:5px; }
+  .mission-log::-webkit-scrollbar-thumb{ background:rgba(63,48,29,0.45); border-radius:4px; }
+  .log-line{ line-height:1.5; }
+  .log-line .t{ opacity:0.55; margin-right:8px; }
+
+  /* ---------- footer status bar ---------- */
+  .statusbar{
+    display:flex; align-items:center; gap:14px;
+    padding:10px 28px;
+    font-family:'Share Tech Mono',monospace;
+    font-size:12px; letter-spacing:1px;
+    color:rgba(244,247,244,0.7);
+    border-top:1px solid rgba(18,201,136,0.2);
+  }
+  .statusbar .sep{ opacity:0.4; }
+
+  /* ---------- focus states ---------- */
+  .drone-card:focus-visible, .status-pill:focus-visible{
+    outline:2px solid var(--kaitoke-glow); outline-offset:2px;
+  }
+
+  /* ---------- mobile ---------- */
+  @media (max-width:880px){
+    html,body{ overflow-y:auto; height:auto; }
+    .app{ height:auto; }
+    .grid{ grid-template-columns:1fr; }
+    .map-panel{ height:52vh; min-height:340px; }
+    .brand h1{ font-size:15px; letter-spacing:1px; }
+    .sidebar{ padding-bottom:8px; }
+    .block-mission{ min-height:180px; }
+  }
+
+  @media (prefers-reduced-motion: reduce){
+    .dot-field, .radar-sweep, .status-pill .dot{ animation:none; }
+  }
+</style>
+</head>
+<body>
+
+  <div class="dot-field"></div>
+  <div class="void-vignette"></div>
+
+  <div class="app">
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-mark"></div>
+        <h1 class="line-shadow-dark">MULTI-VEHICLE GROUND CONTROL SYSTEM</h1>
+      </div>
+      <div class="vehicle-toggle" id="vehicleToggle">
+        <button class="vt-btn active" data-type="uav">UAV · DRONES</button>
+        <button class="vt-btn" data-type="ugv">UGV · ROVERS</button>
+      </div>
+      <div class="status-pill" id="linkStatus" tabindex="0"><span class="dot"></span>SIMULATION MODE</div>
+    </header>
+
+    <main class="grid">
+      <section class="map-panel">
+        <div class="view-toggle" id="viewToggle">
+          <button class="view-btn active" data-view="2d">TOP VIEW</button>
+          <button class="view-btn" data-view="3d">3D VIEW</button>
+        </div>
+        <div id="map"></div>
+        <div id="scene3d"></div>
+        <div class="hud-overlay">
+          <svg class="radar-rings" viewBox="0 0 100 100" preserveAspectRatio="none">
+            <circle cx="50" cy="50" r="46" vector-effect="non-scaling-stroke"></circle>
+            <circle cx="50" cy="50" r="32" vector-effect="non-scaling-stroke"></circle>
+            <circle cx="50" cy="50" r="18" vector-effect="non-scaling-stroke"></circle>
+          </svg>
+          <div class="radar-sweep"></div>
+          <div class="crosshair"></div>
+          <div class="corner corner-tl"></div>
+          <div class="corner corner-tr"></div>
+          <div class="corner corner-bl"></div>
+          <div class="corner corner-br"></div>
+          <div class="coord-readout line-shadow-dark" id="coordReadout">LAT -- · LON --</div>
+          <div class="map-hint" id="mapHint">CLICK TO ISSUE WAYPOINT</div>
+        </div>
+      </section>
+
+      <aside class="sidebar">
+        <div class="block block-fleet">
+          <div class="block-head line-shadow-light fleet-head">
+            <span>FLEET</span>
+            <button class="run-all-btn" id="runAllBtn">RUN ALL</button>
+          </div>
+          <div class="drone-cards" id="droneCards"></div>
+        </div>
+
+        <div class="block block-telemetry">
+          <div class="block-head line-shadow-light">TELEMETRY</div>
+          <div class="telemetry-grid" id="telemetryGrid"></div>
+        </div>
+
+        <div class="block block-command">
+          <div class="block-head line-shadow-light">FLIGHT PARAMETERS</div>
+          <div class="param-pair">
+            <div class="param-row" id="altParamRow">
+              <div class="param-label"><span>ALTITUDE</span><span class="param-value" id="altValue">20 m</span></div>
+              <input type="range" class="param-slider" id="altSlider" min="5" max="100" step="1" value="20">
+            </div>
+            <div class="param-row">
+              <div class="param-label"><span>SPEED</span><span class="param-value" id="speedValue">5 m/s</span></div>
+              <input type="range" class="param-slider" id="speedSlider" min="1" max="15" step="0.5" value="5">
+            </div>
+          </div>
+          <div class="param-row">
+            <div class="param-label"><span>WAYPOINTS</span><span class="param-value" id="wpCountLabel">5</span></div>
+            <input type="range" class="param-slider" id="wpCountSlider" min="1" max="15" step="1" value="5">
+          </div>
+          <div class="wp-progress" id="wpProgress">0 / 5 SET</div>
+          <div class="wp-buttons">
+            <button class="wp-btn" id="planBtn">PLAN</button>
+            <button class="wp-btn" id="runBtn">RUN</button>
+            <button class="wp-btn" id="clearBtn">CLEAR</button>
+          </div>
+          <div class="param-hint">Set waypoint count, press PLAN, click the map that many times, then RUN.</div>
+        </div>
+
+        <div class="block block-mission">
+          <div class="block-head line-shadow-light">MISSION LOG</div>
+          <div class="mission-log" id="missionLog"></div>
+        </div>
+      </aside>
+    </main>
+
+    <footer class="statusbar">
+      <span id="footTime">--:--:--</span>
+      <span class="sep">•</span>
+      <span id="footConn">SIMULATION</span>
+      <span class="sep">•</span>
+      <span>DRONE_1 SELECTED</span>
+    </footer>
+  </div>
+
+<script>
+(function(){
+  "use strict";
+
+  // ---------------- config ----------------
+  var WS_URL = "ws://localhost:8000/ws";
+  var SPAWN = [-35.363261, 149.165230]; // ArduPilot SITL default spawn
+  var PALETTE = ["#12c988", "#e2b13c", "#5fb4ff", "#e26d5a", "#c77dff", "#7fe0e0"];
+
+  // ---------------- state ----------------
+  var drones = {}; // id -> {lat,lon,alt,heading,speed,battery,mock}
+  var selectedId = 1;
+  var connected = false;
+  var socket = null;
+  var markers = {};
+  var waypointLayer = null;
+  var targetAlt = 20;
+  var targetSpeed = 5;
+
+  var altSlider = document.getElementById('altSlider');
+  var speedSlider = document.getElementById('speedSlider');
+  var altValueEl = document.getElementById('altValue');
+  var speedValueEl = document.getElementById('speedValue');
+
+  altSlider.addEventListener('input', function(){
+    targetAlt = Number(altSlider.value);
+    altValueEl.textContent = targetAlt + ' m';
+  });
+  speedSlider.addEventListener('input', function(){
+    targetSpeed = Number(speedSlider.value);
+    speedValueEl.textContent = targetSpeed.toFixed(1) + ' m/s';
+  });
+  var perDroneParams = {}; // id -> { alt, speed } — remembers what was last commanded per drone
+
+  var vehicleType = 'uav';
+  var activeCountByType = { uav: 1, ugv: 1 };
+  function vehicleLabel(){ return vehicleType === 'uav' ? 'DRONE' : 'ROVER'; }
+  function k(id){ return vehicleType + ':' + id; } // composite key so UAV and UGV never share state
+
+  function hideMarkersForType(type){
+    for(var id = 1; id <= MAX_DRONES; id++){
+      var key = type + ':' + id;
+      if(markers[key]){ map.removeLayer(markers[key]); delete markers[key]; }
+    }
+  }
+
+  function cleanupBeyondCount(n){
+    for(var id = n + 1; id <= MAX_DRONES; id++){
+      var key = k(id);
+      if(markers[key]){ map.removeLayer(markers[key]); delete markers[key]; }
+      delete drones[key];
+    }
+  }
+
+  var vtButtons = Array.prototype.slice.call(document.querySelectorAll('.vt-btn'));
+  vtButtons.forEach(function(btn){
+    btn.onclick = function(){
+      activeCountByType[vehicleType] = activeCount; // remember current type's count before switching
+
+      hideMarkersForType(vehicleType); // remove old type's markers from the map entirely
+
+      vehicleType = btn.dataset.type;
+      vtButtons.forEach(function(b){ b.classList.toggle('active', b === btn); });
+      document.getElementById('altParamRow').style.display = (vehicleType === 'ugv') ? 'none' : 'block';
+
+      activeCount = activeCountByType[vehicleType];
+      cleanupBeyondCount(activeCount);
+      if(selectedId > activeCount) selectedId = 1;
+
+      cardsEl.innerHTML = ''; // full rebuild — avoids showing stale cards from the other type
+      teleBuilt = false; teleNodes = {}; // invalidate cached telemetry nodes too
+
+      logMission('VEHICLE TYPE SET TO ' + (vehicleType === 'uav' ? 'UAV / DRONES' : 'UGV / ROVERS') +
+                  ' — FLEET SIZE ' + activeCount);
+      selectDrone(selectedId);
+      renderCards();
+      renderTelemetry();
+    };
+  });
+
+  var MAX_DRONES = 6;
+  var activeCount = 1;
+
+  function addDrone(){
+    if(activeCount >= MAX_DRONES) return;
+    activeCount++;
+    activeCountByType[vehicleType] = activeCount;
+    logMission(vehicleLabel() + '_' + activeCount + ' ADDED TO FLEET');
+    renderCards();
+  }
+
+  function loadSlidersForDrone(id){
+    var saved = perDroneParams[k(id)];
+    targetAlt = saved ? saved.alt : 20;
+    targetSpeed = saved ? saved.speed : 5;
+    altSlider.value = targetAlt;
+    speedSlider.value = targetSpeed;
+    altValueEl.textContent = targetAlt + ' m';
+    speedValueEl.textContent = targetSpeed.toFixed(1) + ' m/s';
+  }
+
+  // ---------------- mission planning (up to 15 waypoints) ----------------
+  var wpCount = 5;
+  var planning = false;
+  var plannedWaypoints = {}; // droneId -> [{lat,lon,alt,speed}, ...]
+  var wpMarkers = {};        // droneId -> [L.circleMarker, ...]
+
+  var wpCountSlider = document.getElementById('wpCountSlider');
+  var wpCountLabel = document.getElementById('wpCountLabel');
+  var wpProgress = document.getElementById('wpProgress');
+  var planBtn = document.getElementById('planBtn');
+  var runBtn = document.getElementById('runBtn');
+  var clearBtn = document.getElementById('clearBtn');
+
+  wpCountSlider.addEventListener('input', function(){
+    wpCount = Number(wpCountSlider.value);
+    wpCountLabel.textContent = wpCount;
+    updateWpProgress();
+  });
+
+  function updateWpProgress(){
+    var have = (plannedWaypoints[k(selectedId)] || []).length;
+    wpProgress.textContent = have + ' / ' + wpCount + ' SET' + (planning ? ' · CLICK MAP TO ADD' : '');
+  }
+
+  function clearWpMarkers(id){
+    (wpMarkers[k(id)] || []).forEach(function(m){ map.removeLayer(m); });
+    wpMarkers[k(id)] = [];
+  }
+
+  planBtn.onclick = function(){
+    planning = true;
+    plannedWaypoints[k(selectedId)] = [];
+    clearWpMarkers(selectedId);
+    updateWpProgress();
+    logMission('PLANNING MODE ON — CLICK MAP TO SET ' + wpCount + ' WAYPOINTS FOR ' + vehicleLabel() + '_' + selectedId);
+  };
+
+  clearBtn.onclick = function(){
+    plannedWaypoints[k(selectedId)] = [];
+    clearWpMarkers(selectedId);
+    planning = false;
+    updateWpProgress();
+    logMission('MISSION CLEARED FOR ' + vehicleLabel() + '_' + selectedId);
+  };
+
+  runBtn.onclick = function(){
+    planning = false;
+    runMission(selectedId);
+  };
+
+  var runAllBtn = document.getElementById('runAllBtn');
+  runAllBtn.onclick = function(){
+    planning = false;
+    var ran = 0;
+    for(var id = 1; id <= activeCount; id++){
+      if(runMission(id, true)) ran++;
+    }
+    if(ran === 0){
+      logMission('NO ' + vehicleLabel() + 'S HAVE A PLANNED MISSION — PRESS PLAN ON EACH FIRST');
+    } else {
+      logMission('RUN ALL — STARTED ' + ran + ' ' + vehicleLabel() + '(S) SIMULTANEOUSLY');
+    }
+  };
+
+  function runMission(vehicleId, quiet){
+    var runningType = vehicleType; // freeze type in case the user switches mid-run
+    var runningFor = vehicleId;
+    var runningKey = runningType + ':' + runningFor;
+    var wps = plannedWaypoints[runningKey];
+    if(!wps || wps.length === 0){
+      if(!quiet) logMission('NO WAYPOINTS PLANNED FOR ' + vehicleLabel() + '_' + runningFor + ' — PRESS PLAN FIRST');
+      return false;
+    }
+    logMission('RUNNING MISSION — ' + wps.length + ' WAYPOINTS — ' + vehicleLabel() + '_' + runningFor);
+    var i = 0;
+
+    function nextLeg(){
+      if(i >= wps.length){
+        logMission('MISSION COMPLETE — ' + vehicleLabel() + '_' + runningFor);
+        return;
+      }
+      var wp = wps[i];
+      if(connected && socket && socket.readyState === WebSocket.OPEN){
+        try{
+          socket.send(JSON.stringify({
+            action:"goto", drone_id:runningFor, vehicle_type:runningType,
+            lat:wp.lat, lon:wp.lon, alt:wp.alt, speed:wp.speed
+          }));
+        }catch(err){ /* fail silently, connection may have dropped mid-send */ }
+      } else {
+        simTargets[runningKey] = { lat:wp.lat, lon:wp.lon, alt:wp.alt, speed:wp.speed };
+      }
+      logMission('WAYPOINT ' + (i + 1) + '/' + wps.length + ' -> ' + wp.lat.toFixed(5) + ', ' + wp.lon.toFixed(5));
+      i++;
+      setTimeout(nextLeg, 4000); // dwell time per leg before advancing
+    }
+    nextLeg();
+    return true;
+  }
+
+  // ---------------- map ----------------
+  var map = L.map('map', {
+    zoomControl:false,
+    attributionControl:false,
+    dragging:true,
+    scrollWheelZoom:true
+  }).setView(SPAWN, 17);
+
+  // Self-drawn dark grid — no external tile service, so it never fails to
+  // load, never shows blank/white, and never depends on network access.
+  var DarkGrid = L.GridLayer.extend({
+    createTile: function(coords){
+      var tile = document.createElement('canvas');
+      var size = this.getTileSize();
+      tile.width = size.x; tile.height = size.y;
+      var ctx = tile.getContext('2d');
+
+      ctx.fillStyle = '#070b09';
+      ctx.fillRect(0, 0, size.x, size.y);
+
+      ctx.strokeStyle = 'rgba(18,201,136,0.07)';
+      ctx.lineWidth = 1;
+      var step = 32;
+      for(var x = 0; x <= size.x; x += step){
+        ctx.beginPath(); ctx.moveTo(x + 0.5, 0); ctx.lineTo(x + 0.5, size.y); ctx.stroke();
+      }
+      for(var y = 0; y <= size.y; y += step){
+        ctx.beginPath(); ctx.moveTo(0, y + 0.5); ctx.lineTo(size.x, y + 0.5); ctx.stroke();
+      }
+
+      // faint diagonal accent lines, sparse, for a bit of terrain-like texture
+      ctx.strokeStyle = 'rgba(18,201,136,0.04)';
+      for(var i = -size.y; i < size.x; i += 96){
+        ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i + size.y, size.y); ctx.stroke();
+      }
+
+      return tile;
+    }
+  });
+
+  // Base layer: always-on, guaranteed-to-render dark grid.
+  var darkGrid = new DarkGrid({ maxZoom:20, tileSize:256 }).addTo(map);
+
+  // Try real map tiles on top. If they load successfully they cover the
+  // grid completely (real roads/terrain). If they fail or hang, we remove
+  // them and the grid underneath is already there — no blank/white state.
+  var realTiles = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+    subdomains:'abcd', maxZoom:19
+  });
+
+  var tileErrorCount = 0;
+  var tileFallbackTimer = setTimeout(function(){ fallbackToGrid('timeout'); }, 4000);
+
+  function fallbackToGrid(reason){
+    if(!map.hasLayer(realTiles)) return;
+    map.removeLayer(realTiles);
+    clearTimeout(tileFallbackTimer);
+    console.warn('Real map tiles unavailable, using offline grid background:', reason);
+  }
+
+  realTiles.on('tileerror', function(){
+    tileErrorCount++;
+    if(tileErrorCount >= 3) fallbackToGrid('tile errors');
+  });
+  realTiles.on('load', function(){
+    clearTimeout(tileFallbackTimer); // tiles loaded fine, cancel the safety fallback
+  });
+
+  realTiles.addTo(map);
+
+  L.control.zoom({ position:'bottomright' }).addTo(map);
+
+  function colorFor(id){ return PALETTE[(id - 1) % PALETTE.length]; }
+
+  // ---------------- 3D scene ----------------
+  // Real lat/lon/alt from telemetry drives real 3D position — a vehicle at
+  // 50m genuinely sits twice as high as one at 25m. No map tiles here by
+  // design: this is a stylized instrument view, not a photoreal map.
+  var scene3d = new THREE.Scene();
+  var camera3d = new THREE.PerspectiveCamera(55, 1, 0.1, 2000);
+  var renderer3d = new THREE.WebGLRenderer({ antialias:true, alpha:true });
+  var scene3dEl = document.getElementById('scene3d');
+  scene3dEl.appendChild(renderer3d.domElement);
+
+  // ground plane with a faint grid, matching the 2D grid's palette
+  var groundGeo = new THREE.PlaneGeometry(400, 400, 40, 40);
+  var groundMat = new THREE.MeshBasicMaterial({ color:0x070b09, side:THREE.DoubleSide });
+  var ground = new THREE.Mesh(groundGeo, groundMat);
+  ground.rotation.x = -Math.PI / 2;
+  scene3d.add(ground);
+
+  var grid3d = new THREE.GridHelper(400, 40, 0x12c988, 0x0e3b29);
+  grid3d.material.opacity = 0.35;
+  grid3d.material.transparent = true;
+  scene3d.add(grid3d);
+
+  // faint vertical reference lines at the origin, like a HUD center marker
+  var axisGeo = new THREE.BufferGeometry().setFromPoints([
+    new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 120, 0)
+  ]);
+  scene3d.add(new THREE.Line(axisGeo, new THREE.LineBasicMaterial({ color:0x12c988, transparent:true, opacity:0.25 })));
+
+  var meshes3d = {}; // composite key -> { body, stem, label }
+
+  function vehicleMesh(id){
+    var color = new THREE.Color(colorFor(id));
+    var geo = vehicleType === 'uav'
+      ? new THREE.SphereGeometry(2.2, 16, 16)
+      : new THREE.BoxGeometry(3.2, 2, 3.2);
+    var mat = new THREE.MeshBasicMaterial({ color:color });
+    var body = new THREE.Mesh(geo, mat);
+
+    // a thin vertical "stem" connecting the vehicle down to the ground,
+    // so altitude reads clearly even from a top-down camera angle
+    var stemGeo = new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, -1, 0)
+    ]);
+    var stem = new THREE.Line(stemGeo, new THREE.LineBasicMaterial({ color:color, transparent:true, opacity:0.5 }));
+
+    var group = new THREE.Group();
+    group.add(body);
+    group.add(stem);
+    scene3d.add(group);
+    return { group:group, body:body, stem:stem };
+  }
+
+  // meters-per-degree, used to convert lat/lon offsets into a flat local
+  // coordinate system centered on SPAWN — accurate enough at this scale
+  var M_PER_DEG_LAT = 111320;
+  function metersPerDegLon(lat){ return 111320 * Math.cos(lat * Math.PI / 180); }
+
+  function updateScene3d(){
+    var ids = [];
+    for(var i = 1; i <= activeCount; i++){ ids.push(i); }
+
+    ids.forEach(function(id){
+      var key = k(id);
+      var d = drones[key];
+      if(!d) return;
+
+      if(!meshes3d[key]) meshes3d[key] = vehicleMesh(id);
+      var m = meshes3d[key];
+
+      var x = (d.lon - SPAWN[1]) * metersPerDegLon(SPAWN[0]);
+      var z = -(d.lat - SPAWN[0]) * M_PER_DEG_LAT; // negate so north is "forward"
+      var y = Math.max(0.3, d.alt);
+
+      m.group.position.set(x, y, z);
+
+      // rescale the stem so it always reaches exactly down to the ground
+      var pts = [new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, -y, 0)];
+      m.stem.geometry.setFromPoints(pts);
+    });
+
+    // remove meshes for vehicles beyond the current count
+    Object.keys(meshes3d).forEach(function(key){
+      var id = Number(key.split(':')[1]);
+      if(key.indexOf(vehicleType + ':') !== 0 || id > activeCount){
+        scene3d.remove(meshes3d[key].group);
+        delete meshes3d[key];
+      }
+    });
+  }
+
+  // ---------------- custom orbit camera (no external controls library) ----------------
+  var orbit = { azimuth: Math.PI / 4, elevation: 0.6, distance: 140, target: new THREE.Vector3(0, 5, 0) };
+  var dragging3d = false, lastX = 0, lastY = 0;
+
+  function updateCamera3d(){
+    var e = orbit.elevation, a = orbit.azimuth, r = orbit.distance;
+    camera3d.position.set(
+      orbit.target.x + r * Math.cos(e) * Math.sin(a),
+      orbit.target.y + r * Math.sin(e),
+      orbit.target.z + r * Math.cos(e) * Math.cos(a)
+    );
+    camera3d.lookAt(orbit.target);
+  }
+
+  scene3dEl.style.cursor = 'grab';
+  scene3dEl.style.touchAction = 'none';
+  scene3dEl.style.userSelect = 'none';
+
+  scene3dEl.addEventListener('pointerdown', function(e){
+    dragging3d = true;
+    lastX = e.clientX; lastY = e.clientY;
+    try{ scene3dEl.setPointerCapture(e.pointerId); }catch(err){}
+    scene3dEl.style.cursor = 'grabbing';
+    e.preventDefault();
+  });
+  scene3dEl.addEventListener('pointerup', function(e){
+    dragging3d = false;
+    scene3dEl.style.cursor = 'grab';
+    try{ scene3dEl.releasePointerCapture(e.pointerId); }catch(err){}
+  });
+  scene3dEl.addEventListener('pointercancel', function(){ dragging3d = false; scene3dEl.style.cursor = 'grab'; });
+  scene3dEl.addEventListener('pointermove', function(e){
+    if(!dragging3d) return;
+    orbit.azimuth -= (e.clientX - lastX) * 0.008;
+    orbit.elevation = Math.max(0.08, Math.min(1.5, orbit.elevation + (e.clientY - lastY) * 0.008));
+    lastX = e.clientX; lastY = e.clientY;
+    updateCamera3d();
+    e.preventDefault();
+  });
+  scene3dEl.addEventListener('wheel', function(e){
+    e.preventDefault();
+    orbit.distance = Math.max(20, Math.min(400, orbit.distance + e.deltaY * 0.15));
+    updateCamera3d();
+  }, { passive:false });
+
+  function resize3d(){
+    var w = scene3dEl.clientWidth || 1, h = scene3dEl.clientHeight || 1;
+    camera3d.aspect = w / h;
+    camera3d.updateProjectionMatrix();
+    renderer3d.setSize(w, h);
+  }
+
+  var active3d = false;
+  function render3dLoop(){
+    requestAnimationFrame(render3dLoop); // reschedule FIRST — a thrown error below can never kill the loop
+    if(!active3d) return;
+    try{
+      updateScene3d();
+      renderer3d.render(scene3d, camera3d);
+    }catch(err){
+      console.error('3D render error (loop kept running):', err);
+    }
+  }
+  updateCamera3d();
+  requestAnimationFrame(render3dLoop);
+
+  // ---------------- view toggle ----------------
+  var viewButtons = Array.prototype.slice.call(document.querySelectorAll('.view-btn'));
+  viewButtons.forEach(function(btn){
+    btn.onclick = function(){
+      viewButtons.forEach(function(b){ b.classList.toggle('active', b === btn); });
+      var is3d = btn.dataset.view === '3d';
+      active3d = is3d;
+      document.getElementById('map').style.display = is3d ? 'none' : 'block';
+      scene3dEl.style.display = is3d ? 'block' : 'none';
+      document.getElementById('mapHint').style.display = is3d ? 'none' : 'block';
+      if(is3d) resize3d();
+    };
+  });
+  window.addEventListener('resize', function(){ if(active3d) resize3d(); });
+
+  function droneIcon(id){
+    var shape = vehicleType === 'uav' ? '50%' : '3px';
+    return L.divIcon({
+      className:'',
+      html:'<div style="width:16px;height:16px;border-radius:'+shape+';background:'+colorFor(id)+
+           ';box-shadow:0 0 12px '+colorFor(id)+', 0 0 0 4px rgba(255,255,255,0.12);"></div>',
+      iconSize:[16,16], iconAnchor:[8,8]
+    });
+  }
+
+  function ensureMarker(key, id, latlng){
+    if(!markers[key]){
+      markers[key] = L.marker(latlng, { icon: droneIcon(id) }).addTo(map);
+    } else {
+      markers[key].setLatLng(latlng);
+      markers[key].setIcon(droneIcon(id));
+    }
+  }
+
+  map.on('click', function(e){
+    var lat = e.latlng.lat, lon = e.latlng.lng;
+
+    if(planning){
+      var list = plannedWaypoints[k(selectedId)] || (plannedWaypoints[k(selectedId)] = []);
+      if(list.length >= wpCount) return;
+
+      list.push({ lat:lat, lon:lon, alt:targetAlt, speed:targetSpeed });
+      var marker = L.circleMarker(e.latlng, {
+        radius:5, color:'#f4f7f4', weight:1.5, fillColor:colorFor(selectedId), fillOpacity:0.9
+      }).addTo(map).bindTooltip(String(list.length), { permanent:true, direction:'top' });
+      (wpMarkers[k(selectedId)] = wpMarkers[k(selectedId)] || []).push(marker);
+
+      updateWpProgress();
+
+      if(list.length >= wpCount){
+        planning = false;
+        logMission(wpCount + ' WAYPOINTS SET FOR ' + vehicleLabel() + '_' + selectedId + ' — PRESS RUN');
+      }
+      return;
+    }
+
+    if(waypointLayer) map.removeLayer(waypointLayer);
+    waypointLayer = L.circleMarker(e.latlng, {
+      radius:5, color:'#f4f7f4', weight:1.5, fillColor:'#12c988', fillOpacity:0.9
+    }).addTo(map);
+
+    logMission("WAYPOINT -> " + vehicleLabel() + "_" + selectedId + "  " + lat.toFixed(5) + ", " + lon.toFixed(5) +
+           "  [ALT " + targetAlt + "m · " + targetSpeed.toFixed(1) + " m/s]");
+
+    if(connected && socket && socket.readyState === WebSocket.OPEN){
+      try{
+        socket.send(JSON.stringify({
+          action:"goto", drone_id:selectedId, vehicle_type:vehicleType,
+          lat:lat, lon:lon, alt:targetAlt, speed:targetSpeed
+        }));
+      }catch(err){ /* fail silently, connection may have dropped mid-send */ }
+    } else {
+      simTargets[k(selectedId)] = { lat:lat, lon:lon, alt:targetAlt, speed:targetSpeed };
+    }
+    perDroneParams[k(selectedId)] = { alt:targetAlt, speed:targetSpeed };
+  });
+
+  map.on('mousemove', function(e){
+    document.getElementById('coordReadout').textContent =
+      "LAT " + e.latlng.lat.toFixed(5) + " · LON " + e.latlng.lng.toFixed(5);
+  });
+
+  // ---------------- sidebar rendering ----------------
+  var cardsEl = document.getElementById('droneCards');
+  var teleEl = document.getElementById('telemetryGrid');
+  var logEl = document.getElementById('missionLog');
+  var footConn = document.getElementById('footConn');
+  var footTime = document.getElementById('footTime');
+  var linkStatus = document.getElementById('linkStatus');
+
+  function selectDrone(id){
+    if(id > activeCount) return;
+    selectedId = id;
+    Array.prototype.forEach.call(cardsEl.children, function(card){
+      card.classList.toggle('selected', Number(card.dataset.id) === id);
+    });
+    document.querySelector('.statusbar span:last-child').textContent = vehicleLabel() + "_" + id + " SELECTED";
+    loadSlidersForDrone(id);
+    renderTelemetry();
+    updateWpProgress();
+  }
+
+  function renderCards(){
+    var ids = [];
+    for(var i = 1; i <= activeCount; i++){ ids.push(i); }
+
+    ids.forEach(function(id){
+      var d = drones[k(id)];
+      if(!d) return;
+      var card = cardsEl.querySelector('[data-id="'+id+'"]');
+      if(!card){
+        card = document.createElement('div');
+        card.className = 'drone-card' + (id === selectedId ? ' selected' : '');
+        card.dataset.id = id;
+        card.tabIndex = 0;
+        card.onclick = function(){ selectDrone(id); };
+        card.onkeydown = function(ev){ if(ev.key === 'Enter' || ev.key === ' ') selectDrone(id); };
+        // build the inner structure once; later frames only update text nodes
+        card.innerHTML =
+          '<span class="swatch"></span><span class="name"></span><span class="badge"></span>';
+        cardsEl.appendChild(card);
+      }
+
+      // update in place — never rewrite innerHTML, which would destroy
+      // the nodes mid-click and swallow the user's input
+      var swatch = card.querySelector('.swatch');
+      var nameEl = card.querySelector('.name');
+      var badgeEl = card.querySelector('.badge');
+
+      var color = colorFor(id);
+      if(swatch.dataset.c !== color){ swatch.style.background = color; swatch.dataset.c = color; }
+
+      var nameText = (vehicleType === 'uav' ? 'D' : 'R') + id + (d.mock ? '*' : '');
+      if(nameEl.textContent !== nameText) nameEl.textContent = nameText;
+
+      var badgeText = d.alt.toFixed(0) + 'm';
+      if(badgeEl.textContent !== badgeText) badgeEl.textContent = badgeText;
+    });
+
+    Array.prototype.slice.call(cardsEl.querySelectorAll('.drone-card')).forEach(function(card){
+      if(Number(card.dataset.id) > activeCount) card.remove();
+    });
+
+    var addTile = cardsEl.querySelector('.add-drone-card');
+    if(activeCount < MAX_DRONES){
+      if(!addTile){
+        addTile = document.createElement('div');
+        addTile.className = 'add-drone-card';
+        addTile.textContent = '+';
+        addTile.onclick = addDrone;
+        cardsEl.appendChild(addTile);
+      } else if(addTile !== cardsEl.lastElementChild){
+        // only re-append when it's genuinely out of place — re-appending every
+        // frame was cancelling clicks before they registered
+        cardsEl.appendChild(addTile);
+      }
+    } else if(addTile){
+      addTile.remove();
+    }
+  }
+
+  var teleBuilt = false;
+  var teleNodes = {};
+
+  function renderTelemetry(){
+    var d = drones[k(selectedId)];
+    if(!d){
+      if(teleBuilt){ teleEl.innerHTML = ''; teleBuilt = false; teleNodes = {}; }
+      return;
+    }
+
+    if(!teleBuilt){
+      teleEl.innerHTML =
+        telItem('alt', 'ALTITUDE') +
+        telItem('speed', 'SPEED') +
+        telItem('heading', 'HEADING') +
+        telItem('battery', 'BATTERY');
+      ['alt','speed','heading','battery'].forEach(function(key){
+        teleNodes[key] = {
+          label: teleEl.querySelector('[data-k="'+key+'"] .tele-label'),
+          value: teleEl.querySelector('[data-k="'+key+'"] .tele-value')
+        };
+      });
+      teleBuilt = true;
+    }
+
+    // update text only — no DOM rebuilding, so nothing flickers or eats clicks
+    var altLabel = vehicleType === 'uav' ? 'ALTITUDE' : 'ELEVATION';
+    if(teleNodes.alt.label.textContent !== altLabel) teleNodes.alt.label.textContent = altLabel;
+
+    setText(teleNodes.alt.value, d.alt.toFixed(1) + ' m');
+    setText(teleNodes.speed.value, d.speed.toFixed(1) + ' m/s');
+    setText(teleNodes.heading.value, d.heading.toFixed(0) + '°');
+    setText(teleNodes.battery.value, d.battery != null ? d.battery.toFixed(0) + '%' : '--');
+  }
+
+  function setText(node, text){
+    if(node && node.textContent !== text) node.textContent = text;
+  }
+
+  function telItem(key, label){
+    return '<div class="tele-item" data-k="'+key+'"><div class="tele-label">'+label+'</div><div class="tele-value line-shadow-light">--</div></div>';
+  }
+
+  function logMission(text){
+    var line = document.createElement('div');
+    line.className = 'log-line';
+    var now = new Date();
+    var ts = now.toTimeString().slice(0,8);
+    line.innerHTML = '<span class="t">'+ts+'</span>' + text;
+    logEl.insertBefore(line, logEl.firstChild);
+    while(logEl.children.length > 40) logEl.removeChild(logEl.lastChild);
+  }
+
+  // ---------------- clock ----------------
+  setInterval(function(){
+    footTime.textContent = new Date().toTimeString().slice(0,8);
+  }, 1000);
+
+  // ---------------- live WebSocket attempt ----------------
+  function setConnected(isLive){
+    connected = isLive;
+    if(isLive){
+      linkStatus.innerHTML = '<span class="dot"></span>LIVE TELEMETRY';
+      footConn.textContent = 'LIVE';
+    } else {
+      linkStatus.innerHTML = '<span class="dot"></span>SIMULATION MODE';
+      footConn.textContent = 'SIMULATION';
+    }
+  }
+
+  function applyTelemetry(list){
+    list.forEach(function(d){
+      var key = (d.vehicle_type || 'uav') + ':' + d.drone_id;
+      drones[key] = d;
+      ensureMarker(key, d.drone_id, [d.lat, d.lon]);
+    });
+    renderCards();
+    renderTelemetry();
+  }
+
+  function tryLiveConnection(){
+    try{
+      socket = new WebSocket(WS_URL);
+    }catch(err){
+      return; // stay in simulation mode
+    }
+
+    var connectTimeout = setTimeout(function(){
+      if(socket && socket.readyState !== WebSocket.OPEN){ socket.close(); }
+    }, 2500);
+
+    socket.onopen = function(){
+      clearTimeout(connectTimeout);
+      setConnected(true);
+      logMission('LINK ESTABLISHED — LIVE FEED ACTIVE');
+    };
+    socket.onmessage = function(event){
+      try{
+        var msg = JSON.parse(event.data);
+        if(msg.type === 'telemetry' && Array.isArray(msg.drones)){
+          applyTelemetry(msg.drones);
+        }
+      }catch(err){ /* ignore malformed frame */ }
+    };
+    socket.onerror = function(){ /* fall through to onclose */ };
+    socket.onclose = function(){
+      clearTimeout(connectTimeout);
+      if(connected){ logMission('LINK LOST — REVERTING TO SIMULATION'); }
+      setConnected(false);
+    };
+  }
+
+  // ---------------- built-in simulation (used until a real link connects) ----------------
+  var simTargets = {}; // id -> {lat,lon} click-to-fly target while simulated
+  var simStart = Date.now();
+
+  var simPos = {}; // id -> {lat, lon, alt} — real persisted position, moves a little each frame
+
+  function simulateFrame(){
+    if(connected) return;
+    var t = (Date.now() - simStart) / 1000;
+    var activeIds = [];
+    for(var i = 1; i <= activeCount; i++){ activeIds.push(i); }
+    activeIds.forEach(function(id){
+      var centerLat = SPAWN[0] + (((id - 1) % 3) - 1) * 0.0006;
+      var centerLon = SPAWN[1] + Math.floor((id - 1) / 3) * 0.0009;
+
+      var posKey = k(id);
+      if(!simPos[posKey]){
+        simPos[posKey] = { lat:centerLat, lon:centerLon, alt:0.3 };
+      }
+      var pos = simPos[posKey];
+      var target = simTargets[posKey];
+
+      var speed = 0, heading = 0;
+
+      if(target){
+        // move a fraction of the remaining distance each frame — real glide, not a jump.
+        // higher commanded speed = faster convergence per second.
+        var step = Math.min(0.9, (target.speed / 15) * 0.35 + 0.03);
+        pos.lat += (target.lat - pos.lat) * step;
+        pos.lon += (target.lon - pos.lon) * step;
+        pos.alt += (target.alt - pos.alt) * step;
+        speed = target.speed;
+        heading = (Math.atan2(target.lon - pos.lon, target.lat - pos.lat) * 180 / Math.PI + 360) % 360;
+      }
+
+      drones[posKey] = {
+        drone_id:id,
+        lat:pos.lat, lon:pos.lon,
+        alt: pos.alt,
+        heading: heading,
+        speed: speed,
+        battery: Math.max(20, 100 - (t/6) % 80),
+        mock:true
+      };
+      ensureMarker(posKey, id, [pos.lat, pos.lon]);
+    });
+    renderCards();
+    renderTelemetry();
+  }
+
+  // ---------------- boot ----------------
+  logMission('SYSTEM INITIALIZED');
+  logMission('AWAITING LINK... FALLING BACK TO SIMULATION');
+  setConnected(false);
+  selectDrone(1);
+  setInterval(simulateFrame, 200);
+  tryLiveConnection();
+
+})();
+</script>
+</body>
+</html>

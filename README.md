@@ -1,4 +1,4 @@
-(https://github.com/user-attachments/files/32346680/README.2.md)
+
 <div align="center">
 
 # Stratum GCS
